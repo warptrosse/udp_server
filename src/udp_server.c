@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -54,6 +55,11 @@ typedef struct udps_internal_data
                                   server close rutine only once. */
 } udps_internal_data_t;
 static udps_internal_data_t srv;
+
+/**
+ * The number of file descriptors that a process may allocate.
+ */
+#define UDPS_RLIMIT_NOFILE 4096
 
 /**
  * Maximum size for a UDP datagram message.
@@ -156,11 +162,25 @@ udps_err_t udps_init(ushort port, uchar nclients)
     struct sockaddr_in srvaddr;
     socklen_t          srvlen;
     int                reuse;
+    struct rlimit      rlp;
 
     /* Setup internal configurations. */
     memset(&srv, 0, sizeof(srv));
     srv.port     = port;
     srv.nclients = nclients;
+
+    /* Setup file limits. */
+    if(getrlimit(RLIMIT_NOFILE, &rlp) != 0) {
+        LOG_SRV(UDPS_LOG_EMERG, ("Could not get RLIMIT_NOFILE: %s (%d)",
+                                 strerror(errno), errno));
+        return UDPS_ERR_GET_RLIMIT;
+    }
+    rlp.rlim_cur = UDPS_RLIMIT_NOFILE;
+    if(setrlimit(RLIMIT_NOFILE, &rlp) != 0) {
+        LOG_SRV(UDPS_LOG_EMERG, ("Could not set RLIMIT_NOFILE: %s (%d)",
+                                 strerror(errno), errno));
+        return UDPS_ERR_SET_RLIMIT;
+    }
 
     /* Create UDP communication endpoint.
      * AF_INET     = Internet domain sockets.
@@ -316,8 +336,8 @@ static udps_err_t udps_receive(void)
                  (uint)cliaddr.sin_addr.s_addr, (uint)cliaddr.sin_port,
                  (uint)nread, msg);
         mqmsglen = strnlen(mqmsg, UDPS_MQ_MSG_MAXLEN);
-        LOG_SRV(UDPS_LOG_NOTICE, ("UDP datagram received: %s (%d)",
-                                  mqmsg, (uint)mqmsglen));
+        LOG_SRV(UDPS_LOG_DEBUG, ("UDP datagram received: %s (%d)",
+                                 mqmsg, (uint)mqmsglen));
 
         /* Enqueue message. */
         if(mq_send(srv.mqd, mqmsg, mqmsglen, 0) != 0) {
@@ -610,7 +630,8 @@ static void udps_client_handler(void)
     /* Handle new connections. */
     for(;;) {
         /* Waiting for new requests. */
-        LOG_SRV(UDPS_LOG_NOTICE, ("Waiting for client request..."));
+        LOG_SRV(UDPS_LOG_DEBUG, ("Waiting for client request..."));
+        memset(cliMsg, 0, (sizeof(char)*UDPS_DATAGRAM_MSG_MAXLEN));
         udps_pool_set_process_status(getpid(), udps_pool_proc_status_idle);
         udps_lock_wait();
         nread = mq_receive(srv.mqd, mqmsg, UDPS_MQ_MSG_MAXLEN, NULL);
@@ -622,8 +643,8 @@ static void udps_client_handler(void)
         }
         udps_lock_release();
         udps_pool_set_process_status(getpid(), udps_pool_proc_status_working);
-        LOG_SRV(UDPS_LOG_NOTICE, ("Processing request: %s (%d)",
-                                  mqmsg, (uint)nread));
+        LOG_SRV(UDPS_LOG_DEBUG, ("Processing request: %s (%d)",
+                                 mqmsg, (uint)nread));
 
         /* Process request. */
         sscanf(mqmsg, UDPS_MQ_MSG_FORMAT, &cliAddr, &cliPort, &cliMsgLen, cliMsg);

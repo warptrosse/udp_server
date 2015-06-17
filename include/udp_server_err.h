@@ -27,6 +27,8 @@ typedef enum udps_err {
     UDPS_ERR_RECV_PARAMS,             /**< Invalid received parameters in a
                                          function. */
     UDPS_ERR_NO_MEMORY,               /**< No memory available. */
+    UDPS_ERR_GET_RLIMIT,              /**< Could not get RLIMIT resource. */
+    UDPS_ERR_SET_RLIMIT,              /**< Could not set RLIMIT resource. */
     UDPS_ERR_CREATE_UDP_SOCKET,       /**< An error occurred while trying to
                                          create the UDP socket. */
     UDPS_ERR_SET_ADDR_REUSABLE,       /**< Unable to set address as reusable. */
